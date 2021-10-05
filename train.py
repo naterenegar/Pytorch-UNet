@@ -11,18 +11,23 @@ from torch import optim
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 
-from utils.data_loading import BasicDataset, CarvanaDataset
+from utils.data_loading import BasicDataset, CarvanaDataset, NPZDataset
 from utils.dice_score import dice_loss
 from evaluate import evaluate
 from unet import UNet
 
+npz_path = Path('../dataset/2021-06-08_544-images.npz')
+testset_path = Path('../dataset/testset.npz')
 dir_img = Path('./data/imgs/')
 dir_mask = Path('./data/masks/')
 dir_checkpoint = Path('./checkpoints/')
 
+def count_parameters(model): 
+    return sum(p.numel() for p in model.parameters() if p.requires_grad) 
 
 def train_net(net,
               device,
+              wandb_entity: str,
               epochs: int = 5,
               batch_size: int = 1,
               learning_rate: float = 0.001,
@@ -31,10 +36,12 @@ def train_net(net,
               img_scale: float = 0.5,
               amp: bool = False):
     # 1. Create dataset
-    try:
-        dataset = CarvanaDataset(dir_img, dir_mask, img_scale)
-    except (AssertionError, RuntimeError):
-        dataset = BasicDataset(dir_img, dir_mask, img_scale)
+    dataset = NPZDataset(npz_path)
+    testset = NPZDataset(testset_path)
+    #try:
+    #    dataset = CarvanaDataset(dir_img, dir_mask, img_scale)
+    #except (AssertionError, RuntimeError):
+    #    dataset = BasicDataset(dir_img, dir_mask, img_scale)
 
     # 2. Split into train / validation partitions
     n_val = int(len(dataset) * val_percent)
@@ -45,12 +52,15 @@ def train_net(net,
     loader_args = dict(batch_size=batch_size, num_workers=4, pin_memory=True)
     train_loader = DataLoader(train_set, shuffle=True, **loader_args)
     val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **loader_args)
+    test_loader = DataLoader(testset, shuffle=False, drop_last=True, **loader_args)
 
     # (Initialize logging)
-    experiment = wandb.init(project='U-Net', resume='allow', anonymous='must')
+    logging.info('Initializing wandb project')
+    experiment = wandb.init(project='U-Net-cellseg', resume='allow', entity=wandb_entity)
+    logging.info('wandb project initialized')
     experiment.config.update(dict(epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
                                   val_percent=val_percent, save_checkpoint=save_checkpoint, img_scale=img_scale,
-                                  amp=amp))
+                                  amp=amp, num_parameters=count_parameters(net)))
 
     logging.info(f'''Starting training:
         Epochs:          {epochs}
@@ -140,9 +150,14 @@ def train_net(net,
             torch.save(net.state_dict(), str(dir_checkpoint / 'checkpoint_epoch{}.pth'.format(epoch + 1)))
             logging.info(f'Checkpoint {epoch + 1} saved!')
 
+    # 6. Evaluate on testset
+    test_score = evaluate(net, test_loader, device)
+    experiment.log({'test Dice': test_score})
+
 
 def get_args():
     parser = argparse.ArgumentParser(description='Train the UNet on images and target masks')
+    parser.add_argument(dest='wandb_entity', type=str, help='wandb entity to send data to')
     parser.add_argument('--epochs', '-e', metavar='E', type=int, default=5, help='Number of epochs')
     parser.add_argument('--batch-size', '-b', dest='batch_size', metavar='B', type=int, default=1, help='Batch size')
     parser.add_argument('--learning-rate', '-l', metavar='LR', type=float, default=0.00001,
@@ -166,21 +181,25 @@ if __name__ == '__main__':
     # Change here to adapt to your data
     # n_channels=3 for RGB images
     # n_classes is the number of probabilities you want to get per pixel
-    net = UNet(n_channels=3, n_classes=2, bilinear=True)
+    net = UNet(n_channels=1, n_classes=2, bilinear=True)
 
     logging.info(f'Network:\n'
                  f'\t{net.n_channels} input channels\n'
                  f'\t{net.n_classes} output channels (classes)\n'
                  f'\t{"Bilinear" if net.bilinear else "Transposed conv"} upscaling')
+    logging.info(f'Network parameters {count_parameters(net)}')
 
     if args.load:
         net.load_state_dict(torch.load(args.load, map_location=device))
         logging.info(f'Model loaded from {args.load}')
 
+    logging.info('Sending network to device')
     net.to(device=device)
+    logging.info('network on device')
     try:
         train_net(net=net,
                   epochs=args.epochs,
+                  wandb_entity=args.wandb_entity,
                   batch_size=args.batch_size,
                   learning_rate=args.lr,
                   device=device,
