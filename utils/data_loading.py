@@ -8,6 +8,65 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
+class NPZDataset(Dataset):
+    def __init__(self, npz_path: str, n_channels: int = 1, X_str: str = 'X', mask_str: str = 'y', scale: float = 1.0):
+        self.file = np.load(npz_path)
+        self.images = self.file[X_str]
+        self.masks = self.file[mask_str]
+        assert 0 < scale <= 1, 'Scale must be between 0 and 1'
+        assert len(self.images) == len(self.masks)
+        self.scale = scale
+
+        if self.images.shape[-1] >= 3 and n_channels == 1:
+            self.images = self.convert_to_gray(self.images)
+        logging.info(f'Creating dataset with {len(self.images)} examples')
+
+    def __len__(self):
+        return len(self.images)
+
+    @classmethod
+    def preprocess(cls, pil_img, scale, is_mask):
+        w, h = pil_img.size
+        newW, newH = int(scale * w), int(scale * h)
+        assert newW > 0 and newH > 0, 'Scale is too small, resized images would have no pixel'
+        pil_img = pil_img.resize((newW, newH))
+        img_ndarray = np.asarray(pil_img)
+
+        if img_ndarray.ndim == 2 and not is_mask:
+            img_ndarray = img_ndarray[np.newaxis, ...]
+        elif not is_mask:
+            img_ndarray = img_ndarray.transpose((2, 0, 1))
+
+        if not is_mask:
+            img_ndarray = img_ndarray / 255
+
+        return img_ndarray
+
+    @classmethod
+    def convert_to_gray(cls, images):
+        red = images[:,:,:,0] / 255
+        green = images[:,:,:,1] / 255
+        blue = images[:,:,:,2] / 255
+
+        # Linear approximation of gamma decompression-recompression
+        return (0.299 * red + 0.587 * green + 0.144 * blue)
+
+    def __getitem__(self, idx):
+        m = self.masks[idx].copy()
+        m[m > 0] = 1
+        mask = Image.fromarray(np.squeeze(m))
+        img = Image.fromarray(np.squeeze(self.images[idx]))
+
+        assert img.size == mask.size, \
+            'Image and mask {name} should be the same size, but are {img.size} and {mask.size}'
+
+        img = self.preprocess(img, self.scale, is_mask=False)
+        mask = self.preprocess(mask, self.scale, is_mask=True)
+
+        return {
+            'image': torch.as_tensor(img.copy()).float().contiguous(),
+            'mask': torch.as_tensor(mask.copy()).long().contiguous()
+        }
 
 class BasicDataset(Dataset):
     def __init__(self, images_dir: str, masks_dir: str, scale: float = 1.0, mask_suffix: str = ''):
@@ -32,7 +91,7 @@ class BasicDataset(Dataset):
         assert newW > 0 and newH > 0, 'Scale is too small, resized images would have no pixel'
         pil_img = pil_img.resize((newW, newH))
         img_ndarray = np.asarray(pil_img)
-
+    
         if img_ndarray.ndim == 2 and not is_mask:
             img_ndarray = img_ndarray[np.newaxis, ...]
         elif not is_mask:
