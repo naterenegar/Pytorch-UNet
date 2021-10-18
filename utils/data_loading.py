@@ -8,8 +8,6 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
-import matplotlib.pyplot as plt
-
 class NPZDataset(Dataset):
 
     def __init__(self, npz_path: str, n_channels: int = 1, X_str: str = 'X',
@@ -70,15 +68,12 @@ class NPZDataset(Dataset):
 
         if self.transform:
             # Append our image and mask into one image with more channels, then transform, then split 
-            append = torch.as_tensor(np.append(img,mask,axis=-1).copy())
+            # NOTE: Assumes grayscale
+            append = torch.as_tensor(np.stack([np.squeeze(img),np.squeeze(mask)],axis=0).copy())
             append = self.transform(append)
             append = append.detach().numpy()
-            if np.unique(append[:,:,0]).size is 2:
-                img = append[:,:,1]
-                mask = append[:,:,0]
-            else:
-                img = append[:,:,0]
-                mask = append[:,:,1]
+            img = append[0,:,:]
+            mask = append[1,:,:]
 
         img = Image.fromarray(np.squeeze(img))
         mask = Image.fromarray(np.squeeze(mask))

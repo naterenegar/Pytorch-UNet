@@ -26,8 +26,6 @@ dir_img = Path('./data/imgs/')
 dir_mask = Path('./data/masks/')
 dir_checkpoint = Path('./checkpoints/')
 
-# TODO: Data augmentation 
-#    - [90, 180, 270] degree rotations 
 # TODO: Logging
 #    - model type
 #    - loss function
@@ -35,7 +33,6 @@ dir_checkpoint = Path('./checkpoints/')
 #    - data augmentation
 # TODO: Port deepcell (resnet) to pytorth
 # TODO: Make resnet and unet scalable for efficientnet algorithm
-
 
 class RotationFromList:
     """Rotate by one of the given angles."""
@@ -45,7 +42,6 @@ class RotationFromList:
 
     def __call__(self, x):
         angle = random.choice(self.angles)
-        print(angle)
         return TF.rotate(x, angle)
 
 def count_parameters(model): 
@@ -65,7 +61,7 @@ def train_net(net,
 
     # Data augmentation
     transforms_train = transforms.Compose([
-        #RotationFromList([90, 180, 270]),
+        RotationFromList([90, 180, 270]),
         transforms.RandomHorizontalFlip(),
         transforms.RandomVerticalFlip() 
     ])
