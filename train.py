@@ -61,7 +61,7 @@ def train_net(net,
 
     # Data augmentation
     transforms_train = transforms.Compose([
-        RotationFromList([90, 180, 270]),
+        RotationFromList([0, 90, 180, 270]),
         transforms.RandomHorizontalFlip(),
         transforms.RandomVerticalFlip() 
     ])
