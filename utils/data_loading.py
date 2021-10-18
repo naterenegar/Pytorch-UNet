@@ -8,11 +8,16 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
+import matplotlib.pyplot as plt
+
 class NPZDataset(Dataset):
-    def __init__(self, npz_path: str, n_channels: int = 1, X_str: str = 'X', mask_str: str = 'y', scale: float = 1.0):
+
+    def __init__(self, npz_path: str, n_channels: int = 1, X_str: str = 'X',
+            mask_str: str = 'y', scale: float = 1.0, transform=None):
         self.file = np.load(npz_path)
         self.images = self.file[X_str]
         self.masks = self.file[mask_str]
+        self.transform = transform
         assert 0 < scale <= 1, 'Scale must be between 0 and 1'
         assert len(self.images) == len(self.masks)
         self.scale = scale
@@ -51,14 +56,32 @@ class NPZDataset(Dataset):
         # Linear approximation of gamma decompression-recompression
         return (0.299 * red + 0.587 * green + 0.144 * blue)
 
+    @classmethod
+    def set_transform(self, transform):
+        self.transform = transform
+
     def __getitem__(self, idx):
-        m = self.masks[idx].copy()
-        m[m > 0] = 1
-        mask = Image.fromarray(np.squeeze(m))
-        img = Image.fromarray(np.squeeze(self.images[idx]))
+        mask = self.masks[idx].copy()
+        mask[mask > 0] = 1
+        img = self.images[idx]
 
         assert img.size == mask.size, \
             'Image and mask {name} should be the same size, but are {img.size} and {mask.size}'
+
+        if self.transform:
+            # Append our image and mask into one image with more channels, then transform, then split 
+            append = torch.as_tensor(np.append(img,mask,axis=-1).copy())
+            append = self.transform(append)
+            append = append.detach().numpy()
+            if np.unique(append[:,:,0]).size is 2:
+                img = append[:,:,1]
+                mask = append[:,:,0]
+            else:
+                img = append[:,:,0]
+                mask = append[:,:,1]
+
+        img = Image.fromarray(np.squeeze(img))
+        mask = Image.fromarray(np.squeeze(mask))
 
         img = self.preprocess(img, self.scale, is_mask=False)
         mask = self.preprocess(mask, self.scale, is_mask=True)

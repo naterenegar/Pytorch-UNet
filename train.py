@@ -9,6 +9,7 @@ import torch.nn.functional as F
 import wandb
 from torch import optim
 from torch.utils.data import DataLoader, random_split
+from torchvision import transforms
 from tqdm import tqdm
 
 from utils.data_loading import BasicDataset, CarvanaDataset, NPZDataset
@@ -16,11 +17,36 @@ from utils.dice_score import dice_loss
 from evaluate import evaluate
 from unet import UNet
 
+import torchvision.transforms.functional as TF
+import random
+
 npz_path = Path('../dataset/2021-06-08_544-images.npz')
 testset_path = Path('../dataset/testset.npz')
 dir_img = Path('./data/imgs/')
 dir_mask = Path('./data/masks/')
 dir_checkpoint = Path('./checkpoints/')
+
+# TODO: Data augmentation 
+#    - [90, 180, 270] degree rotations 
+# TODO: Logging
+#    - model type
+#    - loss function
+#    - dataset size / name
+#    - data augmentation
+# TODO: Port deepcell (resnet) to pytorth
+# TODO: Make resnet and unet scalable for efficientnet algorithm
+
+
+class RotationFromList:
+    """Rotate by one of the given angles."""
+
+    def __init__(self, angles):
+        self.angles = angles
+
+    def __call__(self, x):
+        angle = random.choice(self.angles)
+        print(angle)
+        return TF.rotate(x, angle)
 
 def count_parameters(model): 
     return sum(p.numel() for p in model.parameters() if p.requires_grad) 
@@ -36,17 +62,23 @@ def train_net(net,
               img_scale: float = 0.5,
               amp: bool = False):
     # 1. Create dataset
+
+    # Data augmentation
+    transforms_train = transforms.Compose([
+        #RotationFromList([90, 180, 270]),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomVerticalFlip() 
+    ])
+
     dataset = NPZDataset(npz_path)
+    dataset_aug = NPZDataset(npz_path, transform=transforms_train)
     testset = NPZDataset(testset_path)
-    #try:
-    #    dataset = CarvanaDataset(dir_img, dir_mask, img_scale)
-    #except (AssertionError, RuntimeError):
-    #    dataset = BasicDataset(dir_img, dir_mask, img_scale)
 
     # 2. Split into train / validation partitions
     n_val = int(len(dataset) * val_percent)
     n_train = len(dataset) - n_val
-    train_set, val_set = random_split(dataset, [n_train, n_val], generator=torch.Generator().manual_seed(0))
+    train_set = random_split(dataset_aug, [n_train, n_val], generator=torch.Generator().manual_seed(0))[0]
+    val_set = random_split(dataset, [n_train, n_val], generator=torch.Generator().manual_seed(0))[1]
 
     # 3. Create data loaders
     loader_args = dict(batch_size=batch_size, num_workers=4, pin_memory=True)
@@ -116,17 +148,17 @@ def train_net(net,
                 experiment.log({
                     'train loss': loss.item(),
                     'step': global_step,
-                    'epoch': epoch
+                    'epoch': epoch + 1
                 })
                 pbar.set_postfix(**{'loss (batch)': loss.item()})
 
                 # Evaluation round
                 if global_step % (n_train // (10 * batch_size)) == 0:
-                    histograms = {}
-                    for tag, value in net.named_parameters():
-                        tag = tag.replace('/', '.')
-                        histograms['Weights/' + tag] = wandb.Histogram(value.data.cpu())
-                        histograms['Gradients/' + tag] = wandb.Histogram(value.grad.data.cpu())
+#                    histograms = {}
+#                    for tag, value in net.named_parameters():
+#                        tag = tag.replace('/', '.')
+#                        histograms['Weights/' + tag] = wandb.Histogram(value.data.cpu())
+#                        histograms['Gradients/' + tag] = wandb.Histogram(value.grad.data.cpu())
 
                     val_score = evaluate(net, val_loader, device)
                     scheduler.step(val_score)
@@ -141,8 +173,8 @@ def train_net(net,
                             'pred': wandb.Image(torch.softmax(masks_pred, dim=1)[0].float().cpu()),
                         },
                         'step': global_step,
-                        'epoch': epoch,
-                        **histograms
+                        'epoch': epoch + 1,
+#                        **histograms
                     })
 
         if save_checkpoint:
