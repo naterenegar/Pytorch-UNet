@@ -22,10 +22,7 @@ import random
 
 npz_path = Path('../dataset/2021-06-08_544-images.npz')
 testset_path = Path('../dataset/testset.npz')
-elec_seq_path = Path('./resized_es_reflect.npz')
-dir_img = Path('./data/imgs/')
-dir_mask = Path('./data/masks/')
-dir_checkpoint = Path('./checkpoints/')
+elec_seq_path = Path('../dataset/resized_es_reflect.npz')
 
 class RotationFromList:
     """Rotate by one of the given angles."""
