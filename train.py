@@ -224,15 +224,11 @@ if __name__ == '__main__':
 
     # This will evaluate a loaded model on a range of thresholds, scales, and ious
     if args.load:
-        print("thresh", "scale", "iou")
-        for thresh in range(50, 101):
-            for scale in range(50, 100):
-                testset = NPZDataset(testset_path, scale=(scale / 100))
-                loader_args = dict(batch_size=1, num_workers=4, pin_memory=True)
-                test_loader = DataLoader(testset, shuffle=False, drop_last=True, **loader_args)
-                test_score = evaluate(net, test_loader, device, save_results=False, thresh=(thresh / 100))
-                print(thresh / 100, scale / 100, str(test_score.item()))
-                #print("Test score on our set, untrained: " + str(test_score.item()))
+        testset = NPZDataset('../dataset/full_frames.npz')
+        loader_args = dict(batch_size=1, num_workers=4, pin_memory=True)
+        test_loader = DataLoader(testset, shuffle=False, drop_last=True, **loader_args)
+        test_score = evaluate(net, test_loader, device, save_results=True, npz_name="../dataset/full_frames_pred.npz")
+        print(str(test_score.item()))
         exit()
 
     try:
