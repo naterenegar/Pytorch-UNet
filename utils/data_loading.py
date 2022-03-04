@@ -8,6 +8,8 @@ import torch
 from PIL import Image
 from torch.utils.data import Dataset
 
+import matplotlib.pyplot as plt
+
 class NPZDataset(Dataset):
 
     def __init__(self, npz_path: str, n_channels: int = 1, X_str: str = 'X',
@@ -16,7 +18,7 @@ class NPZDataset(Dataset):
         self.images = self.file[X_str]
         self.masks = self.file[mask_str]
         self.transform = transform
-        assert 0 < scale <= 1, 'Scale must be between 0 and 1'
+        #assert 0 < scale <= 1, 'Scale must be between 0 and 1'
         assert len(self.images) == len(self.masks)
         self.scale = scale
 
@@ -80,6 +82,12 @@ class NPZDataset(Dataset):
 
         img = self.preprocess(img, self.scale, is_mask=False)
         mask = self.preprocess(mask, self.scale, is_mask=True)
+
+        #plt.imshow(np.squeeze(img), cmap='gray')
+        #plt.show()
+
+        #plt.imshow(np.squeeze(img), cmap='gray')
+        #plt.show()
 
         return {
             'image': torch.as_tensor(img.copy()).float().contiguous(),

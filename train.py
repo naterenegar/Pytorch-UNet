@@ -22,17 +22,10 @@ import random
 
 npz_path = Path('../dataset/2021-06-08_544-images.npz')
 testset_path = Path('../dataset/testset.npz')
+elec_seq_path = Path('./resized_es_reflect.npz')
 dir_img = Path('./data/imgs/')
 dir_mask = Path('./data/masks/')
 dir_checkpoint = Path('./checkpoints/')
-
-# TODO: Logging
-#    - model type
-#    - loss function
-#    - dataset size / name
-#    - data augmentation
-# TODO: Port deepcell (resnet) to pytorth
-# TODO: Make resnet and unet scalable for efficientnet algorithm
 
 class RotationFromList:
     """Rotate by one of the given angles."""
@@ -61,7 +54,7 @@ def train_net(net,
 
     # Data augmentation
     transforms_train = transforms.Compose([
-        RotationFromList([0, 90, 180, 270]),
+        #RotationFromList([0, 90, 180, 270]),
         transforms.RandomHorizontalFlip(),
         transforms.RandomVerticalFlip() 
     ])
@@ -69,6 +62,7 @@ def train_net(net,
     dataset = NPZDataset(npz_path)
     dataset_aug = NPZDataset(npz_path, transform=transforms_train)
     testset = NPZDataset(testset_path)
+    elecset = NPZDataset(elec_seq_path)
 
     # 2. Split into train / validation partitions
     n_val = int(len(dataset) * val_percent)
@@ -81,6 +75,9 @@ def train_net(net,
     train_loader = DataLoader(train_set, shuffle=True, **loader_args)
     val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **loader_args)
     test_loader = DataLoader(testset, shuffle=False, drop_last=True, **loader_args)
+    elec_loader = DataLoader(elecset, shuffle=False, drop_last=True, **loader_args)
+
+    print("test loader length", len(test_loader))
 
     # (Initialize logging)
     logging.info('Initializing wandb project')
@@ -103,6 +100,7 @@ def train_net(net,
     ''')
 
     # 4. Set up the optimizer, the loss, the learning rate scheduler and the loss scaling for AMP
+    #optimizer = optim.Adam(net.parameters(), lr=learning_rate, weight_decay=1e-8)
     optimizer = optim.RMSprop(net.parameters(), lr=learning_rate, weight_decay=1e-8, momentum=0.9)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=2)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
@@ -179,8 +177,11 @@ def train_net(net,
             logging.info(f'Checkpoint {epoch + 1} saved!')
 
     # 6. Evaluate on testset
-    test_score = evaluate(net, test_loader, device)
+    test_score = evaluate(net, test_loader, device, save_results=True, npz_name='unet_predictions.npz')
     experiment.log({'test Dice': test_score})
+
+    # 7. Save the predictions into an npz
+    test_score = evaluate(net, elec_loader, device, save_results=True, npz_name='exp03_elec13_unet.npz')
 
 
 def get_args():
@@ -223,7 +224,20 @@ if __name__ == '__main__':
 
     logging.info('Sending network to device')
     net.to(device=device)
-    logging.info('network on device')
+
+    # This will evaluate a loaded model on a range of thresholds, scales, and ious
+    if args.load:
+        print("thresh", "scale", "iou")
+        for thresh in range(50, 101):
+            for scale in range(50, 100):
+                testset = NPZDataset(testset_path, scale=(scale / 100))
+                loader_args = dict(batch_size=1, num_workers=4, pin_memory=True)
+                test_loader = DataLoader(testset, shuffle=False, drop_last=True, **loader_args)
+                test_score = evaluate(net, test_loader, device, save_results=False, thresh=(thresh / 100))
+                print(thresh / 100, scale / 100, str(test_score.item()))
+                #print("Test score on our set, untrained: " + str(test_score.item()))
+        exit()
+
     try:
         train_net(net=net,
                   epochs=args.epochs,
